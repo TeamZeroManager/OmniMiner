@@ -1,5 +1,8 @@
 package teamzeromanager.omniminer;
 
+import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
 import net.minecraft.block.BlockState;
@@ -17,7 +20,6 @@ import net.minecraft.world.World;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayDeque;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
@@ -26,9 +28,12 @@ public final class OmniMiner implements ModInitializer {
     public static final String MOD_ID = "omniminer";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
+    // Hard cap keeps both the search and the number of break operations predictable.
     private static final int MAX_CONNECTED_ORES = 64;
     private static final TagKey<net.minecraft.block.Block> COMMON_ORES =
             TagKey.of(RegistryKeys.BLOCK, new Identifier("c", "ores"));
+
+    // Prevents the extra block-break events caused by our own break calls from starting new scans.
     private static final Set<UUID> PLAYERS_BREAKING_VEIN = new HashSet<>();
 
     @Override
@@ -37,30 +42,41 @@ public final class OmniMiner implements ModInitializer {
             if (world.isClient || !(player instanceof ServerPlayerEntity serverPlayer)) {
                 return true;
             }
-            if (PLAYERS_BREAKING_VEIN.contains(player.getUuid()) || !isPickaxe(player.getMainHandStack()) || !isOre(state)) {
+
+            UUID playerId = player.getUuid();
+            if (PLAYERS_BREAKING_VEIN.contains(playerId)
+                    || !isPickaxe(player.getMainHandStack())
+                    || !isOre(state)) {
                 return true;
             }
 
-            Set<BlockPos> connectedOres = findConnectedOres(world, pos);
+            LongOpenHashSet connectedOres = findConnectedOres(world, pos);
             if (connectedOres.size() <= 1) {
                 return true;
             }
 
-            PLAYERS_BREAKING_VEIN.add(player.getUuid());
+            PLAYERS_BREAKING_VEIN.add(playerId);
             try {
-                for (BlockPos orePos : connectedOres) {
-                    if (orePos.equals(pos)) continue;
-                    if (!world.getBlockState(orePos).isAir()) {
-                        serverPlayer.interactionManager.tryBreakBlock(orePos);
+                LongIterator iterator = connectedOres.iterator();
+                while (iterator.hasNext()) {
+                    long orePos = iterator.nextLong();
+                    if (orePos == pos.asLong()) {
+                        continue;
+                    }
+
+                    BlockPos target = BlockPos.fromLong(orePos);
+                    if (!world.getBlockState(target).isAir()) {
+                        serverPlayer.interactionManager.tryBreakBlock(target);
                     }
                 }
             } finally {
-                PLAYERS_BREAKING_VEIN.remove(player.getUuid());
+                PLAYERS_BREAKING_VEIN.remove(playerId);
             }
+
             return true;
         });
 
-        LOGGER.info("OmniMiner initialized: connected mixed-ore mining enabled.");
+        LOGGER.info("OmniMiner initialized: optimized mixed-ore mining enabled.");
     }
 
     private static boolean isPickaxe(ItemStack stack) {
@@ -81,26 +97,46 @@ public final class OmniMiner implements ModInitializer {
                 || state.isOf(Blocks.NETHER_GOLD_ORE);
     }
 
-    private static Set<BlockPos> findConnectedOres(World world, BlockPos start) {
-        Set<BlockPos> found = new HashSet<>();
-        ArrayDeque<BlockPos> queue = new ArrayDeque<>();
-        BlockPos origin = start.toImmutable();
-        found.add(origin);
-        queue.add(origin);
+    /**
+     * Finds face-connected ores with primitive packed positions to avoid allocating
+     * a BlockPos and hash node for every visited block.
+     */
+    private static LongOpenHashSet findConnectedOres(World world, BlockPos start) {
+        LongOpenHashSet found = new LongOpenHashSet(MAX_CONNECTED_ORES);
+        LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
+
+        long startPos = start.asLong();
+        found.add(startPos);
+        queue.enqueue(startPos);
+
+        BlockPos.Mutable cursor = new BlockPos.Mutable();
 
         while (!queue.isEmpty() && found.size() < MAX_CONNECTED_ORES) {
-            BlockPos current = queue.removeFirst();
+            long current = queue.dequeueLong();
+            cursor.set(current);
+
             for (Direction direction : Direction.values()) {
-                BlockPos next = current.offset(direction);
-                if (found.contains(next)) continue;
-                if (isOre(world.getBlockState(next))) {
-                    BlockPos immutable = next.toImmutable();
-                    found.add(immutable);
-                    queue.addLast(immutable);
-                    if (found.size() >= MAX_CONNECTED_ORES) break;
+                cursor.set(current).move(direction);
+
+                // Do not cause chunk loads just to search for more ores.
+                if (!world.isChunkLoaded(cursor)) {
+                    continue;
+                }
+
+                if (!isOre(world.getBlockState(cursor))) {
+                    continue;
+                }
+
+                long next = cursor.asLong();
+                if (found.add(next)) {
+                    queue.enqueue(next);
+                    if (found.size() >= MAX_CONNECTED_ORES) {
+                        break;
+                    }
                 }
             }
         }
+
         return found;
     }
 }
