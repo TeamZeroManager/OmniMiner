@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "omniminer",
+  "version": "\u0024{version}",
+  "name": "OmniMiner",
+  "description": "Mine an entire connected vein of different ores in one action.",
+  "authors": ["TeamZeroManager"],
+  "contact": {
+    "sources": "https://github.com/TeamZeroManager/OmniMiner"
+  },
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["teamzeromanager.omniminer.OmniMiner"]
+  },
+  "depends": {
+    "fabricloader": ">=0.14.0",
+    "minecraft": "1.20.1",
+    "java": ">=17",
+    "fabric-api": "*"
+  }
+}
