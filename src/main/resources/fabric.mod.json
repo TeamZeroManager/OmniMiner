@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "omniminer",
-  "version": "\u0024{version}",
+  "version": "${version}",
   "name": "OmniMiner",
   "description": "Mine an entire connected vein of different ores in one action.",
   "authors": ["TeamZeroManager"],
