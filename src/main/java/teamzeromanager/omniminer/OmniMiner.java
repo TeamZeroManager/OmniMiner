@@ -34,7 +34,7 @@ public final class OmniMiner implements ModInitializer {
     @Override
     public void onInitialize() {
         PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, blockEntity) -> {
-            if (world.isClient || !(world instanceof World) || !(player instanceof ServerPlayerEntity serverPlayer)) {
+            if (world.isClient || !(player instanceof ServerPlayerEntity serverPlayer)) {
                 return true;
             }
             if (PLAYERS_BREAKING_VEIN.contains(player.getUuid()) || !isPickaxe(player.getMainHandStack()) || !isOre(state)) {
